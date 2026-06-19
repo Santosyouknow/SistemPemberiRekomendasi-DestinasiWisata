@@ -483,19 +483,19 @@
                 <h3>Statistik Dataset</h3>
                 <div class="stats-grid">
                     <div class="stat-card">
-                        <div class="stat-value">{{ stats.total_destinations }}</div>
+                        <div class="stat-value" id="stat-total">-</div>
                         <div class="stat-label">Destinasi</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">{{ stats.cities|length }}</div>
+                        <div class="stat-value" id="stat-cities">-</div>
                         <div class="stat-label">Kota</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">{{ stats.categories|length }}</div>
+                        <div class="stat-value" id="stat-categories">-</div>
                         <div class="stat-label">Kategori</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">{{ "%.1f"|format(stats.avg_rating) }}</div>
+                        <div class="stat-value" id="stat-rating">-</div>
                         <div class="stat-label">Rating rata-rata (1-5)</div>
                     </div>
                 </div>
@@ -577,156 +577,6 @@
         </div>
     </div>
     
-    <script>
-        function getLocation() {
-            return new Promise((resolve) => {
-                if (!navigator.geolocation) {
-                    resolve(null);
-                    return;
-                }
-                navigator.geolocation.getCurrentPosition(
-                    (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                    () => resolve(null),
-                    { enableHighAccuracy: true, timeout: 8000 }
-                );
-            });
-        }
-
-        async function getRecommendations() {
-            const city = document.getElementById('city').value;
-            const category = document.getElementById('category').value;
-            const minPrice = document.getElementById('min_price').value;
-            const maxPrice = document.getElementById('max_price').value;
-            const maxTime = document.getElementById('max_time').value;
-            const topN = document.getElementById('top_n').value;
-            
-            const container = document.getElementById('results-container');
-            container.innerHTML = '<div class="loading">Memproses rekomendasi...</div>';
-            
-            const loc = await getLocation();
-            
-            try {
-                const response = await fetch('/recommend', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        city, category,
-                        min_price: parseFloat(minPrice) || 0,
-                        max_price: parseFloat(maxPrice) || 0,
-                        max_time: parseFloat(maxTime) || 0,
-                        top_n: parseInt(topN),
-                        user_lat: loc ? loc.lat : null,
-                        user_lng: loc ? loc.lng : null
-                    })
-                });
-                
-                const data = await response.json();
-                displayResults(data.results, data.error);
-            } catch (error) {
-                container.innerHTML = '<div class="no-results">Terjadi kesalahan: ' + error.message + '</div>';
-            }
-        }
-        
-        async function getPopular() {
-            const city = document.getElementById('city').value;
-            const container = document.getElementById('results-container');
-            container.innerHTML = '<div class="loading">Memuat destinasi populer...</div>';
-            
-            const loc = await getLocation();
-            
-            try {
-                const response = await fetch(`/popular?city=${encodeURIComponent(city)}&top_n=10&user_lat=${encodeURIComponent(loc ? loc.lat : '')}&user_lng=${encodeURIComponent(loc ? loc.lng : '')}`);
-                const data = await response.json();
-                displayResults(data.results, null);
-            } catch (error) {
-                container.innerHTML = '<div class="no-results">Terjadi kesalahan: ' + error.message + '</div>';
-            }
-        }
-        
-        function displayResults(results, error) {
-            const container = document.getElementById('results-container');
-            const countElement = document.getElementById('results-count');
-            
-            if (error) {
-                container.innerHTML = `<div class="no-results">${error}</div>`;
-                countElement.textContent = '';
-                return;
-            }
-            
-            if (!results || results.length === 0) {
-                container.innerHTML = '<div class="no-results">Tidak ada destinasi yang ditemukan</div>';
-                countElement.textContent = '0 hasil';
-                return;
-            }
-            
-            countElement.textContent = results.length + ' hasil';
-            
-            let html = '<div class="destination-grid">';
-            
-            results.forEach((dest, index) => {
-                const price = dest.price.toLocaleString('id-ID');
-                html += `
-                    <div class="destination-card">
-                        <div class="destination-name">${index + 1}. ${dest.name}</div>
-                        <div class="destination-meta">
-                            <span class="badge badge-city">${dest.city}</span>
-                            <span class="badge badge-category">${dest.category}</span>
-                        </div>
-                        <div class="destination-details">
-                            <div class="detail-row">
-                                <span class="detail-label">Rating</span>
-                                <span class="detail-value rating">${dest.rating.toFixed(1)} (${dest.rating_count} ulasan)</span>
-                            </div>
-                            <div class="detail-row">
-                                <span class="detail-label">Harga</span>
-                                <span class="detail-value price">Rp ${price}</span>
-                            </div>
-                            ${dest.distance != null ? `
-                            <div class="detail-row">
-                                <span class="detail-label">Jarak</span>
-                                <span class="detail-value">${dest.distance} km</span>
-                            </div>
-                            ` : ''}
-                            <div class="detail-row">
-                                <span class="detail-label">Durasi</span>
-                                <span class="detail-value">${dest.time} menit</span>
-                            </div>
-                            ${dest.similarity ? `
-                            <div class="detail-row">
-                                <span class="detail-label">Kesamaan</span>
-                                <span class="detail-value">${(dest.similarity * 100).toFixed(0)}%</span>
-                            </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += '</div>';
-            container.innerHTML = html;
-        }
-        
-        function clearFilters() {
-            document.getElementById('city').value = 'Semua';
-            document.getElementById('category').value = 'Semua';
-            document.getElementById('min_price').value = '';
-            document.getElementById('max_price').value = '';
-            document.getElementById('max_time').value = '';
-            document.getElementById('top_n').value = '10';
-            
-            document.getElementById('results-count').textContent = '';
-            
-            document.getElementById('results-container').innerHTML = `
-                <div class="no-results">
-                    <p class="welcome-text">Selamat datang di Sistem Rekomendasi Wisata.</p>
-                    <p>Gunakan filter di atas untuk menemukan destinasi wisata yang sesuai dengan preferensi Anda.</p>
-                    <p>Sistem mengombinasikan preferensi pengguna, kualitas destinasi, dan kesamaan konten untuk memberikan rekomendasi terbaik.</p>
-                    <div class="tips-box">
-                        <strong>Tips:</strong> Biarkan filter harga dan waktu kosong untuk melihat semua rekomendasi di kategori yang dipilih.
-                    </div>
-                </div>
-            `;
-        }
-    </script>
+    <script src="recommendation.js"></script>
 </body>
 </html>
