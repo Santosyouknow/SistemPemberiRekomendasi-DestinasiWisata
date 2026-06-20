@@ -61,6 +61,23 @@ class RecommenderEvaluator:
             return 0.0
         
         return np.mean(precisions)
+
+    def ndcg_at_k(self, recommendations, relevant_items, k=10):
+        """
+        NDCG@K: Ranking quality based on relevant items near the top.
+        Uses binary relevance because the dataset has no explicit user ratings.
+        """
+        if len(recommendations) == 0 or len(relevant_items) == 0:
+            return 0.0
+
+        recs_at_k = recommendations[:k]
+        relevance = [1 if item in relevant_items else 0 for item in recs_at_k]
+
+        dcg = sum(rel / np.log2(rank + 2) for rank, rel in enumerate(relevance))
+        ideal_relevance = [1] * min(len(relevant_items), k)
+        idcg = sum(rel / np.log2(rank + 2) for rank, rel in enumerate(ideal_relevance))
+
+        return dcg / idcg if idcg > 0 else 0.0
     
     def hit_rate(self, recommendations, relevant_items, k=10):
         """
@@ -128,9 +145,11 @@ class RecommenderEvaluator:
             'recall': [],
             'f1': [],
             'map': [],
+            'ndcg': [],
             'hit_rate': [],
             'diversity': [],
-            'novelty': []
+            'novelty': [],
+            'scenario_details': []
         }
         
         all_recs = []
@@ -154,6 +173,7 @@ class RecommenderEvaluator:
             recall = self.recall_at_k(rec_ids, relevant, k)
             f1 = self.f1_score(precision, recall)
             map_score = self.mean_average_precision(rec_ids, relevant, k)
+            ndcg = self.ndcg_at_k(rec_ids, relevant, k)
             hit = self.hit_rate(rec_ids, relevant, k)
             div = self.diversity(rec_ids)
             nov = self.novelty(rec_ids)
@@ -162,9 +182,19 @@ class RecommenderEvaluator:
             results['recall'].append(recall)
             results['f1'].append(f1)
             results['map'].append(map_score)
+            results['ndcg'].append(ndcg)
             results['hit_rate'].append(hit)
             results['diversity'].append(div)
             results['novelty'].append(nov)
+            results['scenario_details'].append({
+                'name': test.get('name', f"{test.get('city', 'Semua')} - {test.get('category', 'Semua')}"),
+                'precision': precision,
+                'recall': recall,
+                'ndcg': ndcg,
+                'hit_rate': hit,
+                'recommendation_count': len(rec_ids),
+                'relevant_count': len(relevant)
+            })
         
         # Aggregate results
         aggregated = {
@@ -172,10 +202,12 @@ class RecommenderEvaluator:
             'recall@{}'.format(k): np.mean(results['recall']),
             'f1@{}'.format(k): np.mean(results['f1']),
             'map@{}'.format(k): np.mean(results['map']),
+            'ndcg@{}'.format(k): np.mean(results['ndcg']),
             'hit_rate@{}'.format(k): np.mean(results['hit_rate']),
             'diversity': np.mean(results['diversity']),
             'novelty': np.mean(results['novelty']),
-            'coverage': self.coverage(all_recs, len(self.df))
+            'coverage': self.coverage(all_recs, len(self.df)),
+            'scenario_details': results['scenario_details']
         }
         
         return aggregated
@@ -216,6 +248,77 @@ class RecommenderEvaluator:
             })
         
         return test_cases[:n_cases]
+
+    def generate_scenario_test_cases(self):
+        """
+        Build explicit business scenarios from common user constraints.
+        Relevant items are derived from the same constraints and high rating.
+        """
+        scenario_specs = [
+            {
+                'name': 'Wisata budaya murah di Jakarta',
+                'city': 'Jakarta',
+                'category': 'Budaya',
+                'max_price': 50000,
+                'max_time': None
+            },
+            {
+                'name': 'Taman hiburan keluarga di Yogyakarta',
+                'city': 'Yogyakarta',
+                'category': 'Taman Hiburan',
+                'max_price': 100000,
+                'max_time': 180
+            },
+            {
+                'name': 'Wisata alam di Bandung dengan durasi singkat',
+                'city': 'Bandung',
+                'category': 'Cagar Alam',
+                'max_price': 75000,
+                'max_time': 120
+            },
+            {
+                'name': 'Destinasi bahari di Surabaya',
+                'city': 'Surabaya',
+                'category': 'Bahari',
+                'max_price': None,
+                'max_time': None
+            },
+            {
+                'name': 'Tempat ibadah populer lintas kota',
+                'city': None,
+                'category': 'Tempat Ibadah',
+                'max_price': None,
+                'max_time': None
+            }
+        ]
+
+        test_cases = []
+        for spec in scenario_specs:
+            items = self.df.copy()
+            if spec['city']:
+                items = items[items['City'].str.lower() == spec['city'].lower()]
+            if spec['category']:
+                items = items[items['Category'].str.lower() == spec['category'].lower()]
+            if spec['max_price']:
+                items = items[items['Price'] <= spec['max_price']]
+            if spec['max_time']:
+                items = items[items['Time_Minutes'] <= spec['max_time']]
+
+            if len(items) == 0:
+                continue
+
+            threshold = items['Rating'].quantile(0.7)
+            relevant_items = items[items['Rating'] >= threshold] \
+                .sort_values(['Rating', 'Rating_Count'], ascending=False)['Place_Id'] \
+                .head(10) \
+                .tolist()
+
+            test_cases.append({
+                **spec,
+                'relevant_items': relevant_items
+            })
+
+        return test_cases
     
     def full_evaluation(self, k_values=[5, 10, 20]):
         """
@@ -237,6 +340,8 @@ class RecommenderEvaluator:
             all_metrics[k] = metrics
             
             for metric, value in metrics.items():
+                if metric == 'scenario_details':
+                    continue
                 print(f"{metric:20s}: {value:.4f}")
         
         # Calculate average across all K
@@ -244,13 +349,27 @@ class RecommenderEvaluator:
         avg_precision = np.mean([all_metrics[k]['precision@{}'.format(k)] for k in k_values])
         avg_recall = np.mean([all_metrics[k]['recall@{}'.format(k)] for k in k_values])
         avg_f1 = np.mean([all_metrics[k]['f1@{}'.format(k)] for k in k_values])
+        avg_ndcg = np.mean([all_metrics[k]['ndcg@{}'.format(k)] for k in k_values])
         
         print(f"Average Precision: {avg_precision:.4f}")
         print(f"Average Recall: {avg_recall:.4f}")
         print(f"Average F1-Score: {avg_f1:.4f}")
+        print(f"Average NDCG: {avg_ndcg:.4f}")
         print(f"Coverage: {all_metrics[k_values[0]]['coverage']:.4f}")
         print(f"Diversity: {all_metrics[k_values[0]]['diversity']:.4f}")
         print(f"Novelty: {all_metrics[k_values[0]]['novelty']:.4f}")
+
+        print("\n--- Scenario-based Evaluation @ K=10 ---")
+        scenario_cases = self.generate_scenario_test_cases()
+        scenario_metrics = self.evaluate_recommendations(scenario_cases, k=10)
+        for detail in scenario_metrics['scenario_details']:
+            print(
+                f"{detail['name']}: "
+                f"Precision={detail['precision']:.4f}, "
+                f"Recall={detail['recall']:.4f}, "
+                f"NDCG={detail['ndcg']:.4f}, "
+                f"HitRate={detail['hit_rate']:.4f}"
+            )
         
         return all_metrics
 
