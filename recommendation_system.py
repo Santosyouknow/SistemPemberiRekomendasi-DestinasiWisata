@@ -7,8 +7,11 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
 import pickle
 import os
+import re
 
 class HybridRecommender:
     def __init__(self, data_path='destinasi-wisata-indonesia.csv'):
@@ -19,33 +22,66 @@ class HybridRecommender:
         
     def preprocess_data(self):
         """Preprocess the dataset"""
-        # Clean price column
+        # Remove columns that are empty, duplicated, or not used by the model.
+        unused_columns = ['Column1', '_1', 'Coordinate']
+        self.df = self.df.drop(columns=[c for c in unused_columns if c in self.df.columns])
+
+        # Clean categorical columns
+        self.df['Category'] = self.df['Category'].fillna('Tidak Diketahui').astype(str).str.strip()
+        self.df['City'] = self.df['City'].fillna('Tidak Diketahui').astype(str).str.strip()
+
         self.df['Price'] = pd.to_numeric(self.df['Price'], errors='coerce').fillna(0)
-        
-        # Clean rating column
         self.df['Rating'] = pd.to_numeric(self.df['Rating'], errors='coerce').fillna(0)
-        
-        # Clean time minutes
         self.df['Time_Minutes'] = pd.to_numeric(self.df['Time_Minutes'], errors='coerce').fillna(0)
-        
-        # Clean rating count
         self.df['Rating_Count'] = pd.to_numeric(self.df['Rating_Count'], errors='coerce').fillna(0)
-        
-        # Fill empty descriptions
+
+        # Fill empty descriptions and clean text for TF-IDF.
         self.df['Description'] = self.df['Description'].fillna('')
+        self.df['Description_Clean'] = self.df['Description'].apply(self.clean_text)
+
+        # Normalize rating to 0-1. The dataset mostly stores 4.2 as 42, so convert to
+        # a 1-5 scale first when values are encoded as tens.
+        max_rating = self.df['Rating'].max()
+        rating_on_five = self.df['Rating'] / 10.0 if max_rating > 5 else self.df['Rating']
+        self.df['Rating_Normalized'] = (rating_on_five / 5.0).clip(0, 1)
+
+        scaler = MinMaxScaler()
+        numeric_columns = ['Price', 'Time_Minutes', 'Rating_Count']
+        scaled_values = scaler.fit_transform(self.df[numeric_columns])
+        self.df[['Price_Normalized', 'Time_Normalized', 'Rating_Count_Normalized']] = scaled_values
+        self.numeric_scaler = scaler
         
         # Create combined features for content-based filtering
         self.df['combined_features'] = (
             self.df['Category'].astype(str) + ' ' +
             self.df['City'].astype(str) + ' ' +
-            self.df['Description'].astype(str)
+            self.df['Description_Clean'].astype(str)
         )
+
+    @staticmethod
+    def clean_text(text):
+        """Lowercase text, remove punctuation/digits, and collapse whitespace."""
+        text = str(text).lower()
+        text = re.sub(r'[^a-zA-Z\s]', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
         
     def build_content_model(self):
-        """Build TF-IDF model for content-based filtering"""
-        self.tfidf = TfidfVectorizer(max_features=5000, stop_words='english')
-        self.tfidf_matrix = self.tfidf.fit_transform(self.df['combined_features'])
-        self.cosine_sim = cosine_similarity(self.tfidf_matrix, self.tfidf_matrix)
+        """Build a combined feature matrix for content-based filtering."""
+        self.feature_preprocessor = ColumnTransformer(
+            transformers=[
+                ('description_tfidf', TfidfVectorizer(max_features=5000), 'Description_Clean'),
+                ('category_city_ohe', OneHotEncoder(handle_unknown='ignore'), ['Category', 'City']),
+                (
+                    'numeric_scaled',
+                    MinMaxScaler(),
+                    ['Price', 'Time_Minutes', 'Rating', 'Rating_Count']
+                )
+            ]
+        )
+        self.feature_matrix = self.feature_preprocessor.fit_transform(self.df)
+        self.tfidf_matrix = self.feature_matrix
+        self.cosine_sim = cosine_similarity(self.feature_matrix, self.feature_matrix)
         
     def knowledge_based_filter(self, city=None, category=None, min_price=None, max_price=None, max_time=None):
         """
@@ -126,11 +162,9 @@ class HybridRecommender:
             # Content-based score (similarity to top-rated items in filtered set)
             content_score = self.content_based_score(idx, filtered_df)
             
-            # Rating score (normalized 0-1) - PRIMARY ranking factor
-            rating_score = row['Rating'] / 100.0 if row['Rating'] > 0 else 0
-            
-            # Rating count score (normalized) - popularity indicator
-            count_score = min(row['Rating_Count'] / 50.0, 1.0) if row['Rating_Count'] > 0 else 0
+            # Normalized quality signals from preprocessing.
+            rating_score = row['Rating_Normalized'] if row['Rating'] > 0 else 0
+            count_score = row['Rating_Count_Normalized'] if row['Rating_Count'] > 0 else 0
             
             # Hybrid score: BALANCED combination
             # 60% quality (rating + popularity) ensures we recommend well-rated items
@@ -187,7 +221,12 @@ class HybridRecommender:
             'cities': self.df['City'].unique().tolist(),
             'categories': self.df['Category'].unique().tolist(),
             'avg_rating': round(self.df['Rating'].mean() / 10.0, 2),
-            'price_range': (self.df['Price'].min(), self.df['Price'].max())
+            'price_range': (self.df['Price'].min(), self.df['Price'].max()),
+            'missing_values': self.df.isna().sum().to_dict(),
+            'category_distribution': self.df['Category'].value_counts().to_dict(),
+            'city_distribution': self.df['City'].value_counts().to_dict(),
+            'price_stats': self.df['Price'].describe().round(2).to_dict(),
+            'rating_stats': self.df['Rating'].describe().round(2).to_dict()
         }
         return stats
 
