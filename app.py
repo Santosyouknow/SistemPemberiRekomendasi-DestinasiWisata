@@ -39,6 +39,12 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return round(R * c, 1)
 
 
+def display_rating(rating):
+    """Convert dataset rating to a 1-5 display scale."""
+    rating = float(rating)
+    return round(rating / 10.0, 1) if rating > 5 else round(rating, 1)
+
+
 @app.route('/recommend', methods=['POST'])
 def recommend():
     """API endpoint for recommendations"""
@@ -82,11 +88,12 @@ def recommend():
             'city': row['City'],
             'category': row['Category'],
             'price': int(row['Price']),
-            'rating': float(row['Rating']),
+            'rating': display_rating(row['Rating']),
             'rating_count': int(row['Rating_Count']),
             'time': row['Time_Minutes'] if pd.notna(row['Time_Minutes']) else 0,
             'score': float(row['Score']),
-            'distance': distance
+            'distance': distance,
+            'description': row['Description']
         })
     
     return jsonify({'error': None, 'results': results})
@@ -108,8 +115,11 @@ def similar(place_name):
             'city': row['City'],
             'category': row['Category'],
             'price': int(row['Price']),
-            'rating': float(row['Rating']),
-            'similarity': float(row['Similarity'])
+            'rating': display_rating(row['Rating']),
+            'rating_count': int(row['Rating_Count']),
+            'time': row['Time_Minutes'] if pd.notna(row['Time_Minutes']) else 0,
+            'similarity': float(row['Similarity']),
+            'description': row['Description']
         })
     
     return jsonify({'error': None, 'results': results})
@@ -144,9 +154,11 @@ def popular():
             'city': row['City'],
             'category': row['Category'],
             'price': int(row['Price']),
-            'rating': float(row['Rating']),
+            'rating': display_rating(row['Rating']),
             'rating_count': int(row['Rating_Count']),
-            'distance': distance
+            'time': row['Time_Minutes'] if pd.notna(row['Time_Minutes']) else 0,
+            'distance': distance,
+            'description': row['Description']
         })
     
     return jsonify({'results': results})

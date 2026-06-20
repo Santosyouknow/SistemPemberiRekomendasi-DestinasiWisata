@@ -186,6 +186,9 @@ class HybridRecommender {
             category: this.destinations[item.i].Category,
             price: this.destinations[item.i].Price,
             rating: this.destinations[item.i].Rating,
+            rating_count: this.destinations[item.i].Rating_Count || 0,
+            time: this.destinations[item.i].Time_Minutes || 0,
+            description: this.destinations[item.i].Description,
             similarity: parseFloat(item.sim.toFixed(4))
         }));
         
@@ -205,6 +208,8 @@ class HybridRecommender {
             price: d.Price,
             rating: d.Rating,
             rating_count: d.Rating_Count,
+            time: d.Time_Minutes || 0,
+            description: d.Description,
             Popularity: parseFloat(d.Popularity.toFixed(2))
         }));
     }
@@ -268,6 +273,16 @@ function populateFilters() {
     document.getElementById('stat-rating').textContent = currentStats.avg_rating.toFixed(1);
 }
 
+function formatRating(rating) {
+    const value = Number(rating) || 0;
+    const normalized = value > 5 ? value / 10 : value;
+    return normalized.toFixed(1);
+}
+
+function scrollToResults() {
+    document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function getLocation() {
     return new Promise((resolve) => {
         if (!navigator.geolocation) { resolve(null); return; }
@@ -314,6 +329,7 @@ async function getRecommendations() {
     });
     
     displayResults(results);
+    scrollToResults();
 }
 
 async function getPopular() {
@@ -337,10 +353,15 @@ async function getPopular() {
     });
     
     displayResults(results);
+    scrollToResults();
 }
 
-function getSimilar() {
-    const placeName = document.getElementById('similar-input').value.trim();
+function getSimilar(placeName = null) {
+    if (!placeName) {
+        const input = document.getElementById('similar-input');
+        placeName = input ? input.value.trim() : 'Monumen Nasional';
+    }
+
     if (!placeName) {
         alert('Masukkan nama destinasi');
         return;
@@ -362,6 +383,7 @@ function getSimilar() {
     }
     
     displayResults(sims);
+    scrollToResults();
 }
 
 function displayResults(results) {
@@ -380,6 +402,8 @@ function displayResults(results) {
     
     results.forEach((dest, index) => {
         const price = dest.price.toLocaleString('id-ID');
+        const ratingCount = dest.rating_count ?? 0;
+        const time = dest.time ?? 0;
         const truncatedDesc = dest.description && dest.description.length > 120 
             ? dest.description.substring(0, 120) + '...' 
             : (dest.description || '');
@@ -395,7 +419,7 @@ function displayResults(results) {
                 <div class="destination-details">
                     <div class="detail-row">
                         <span class="detail-label">Rating</span>
-                        <span class="detail-value rating">${dest.rating.toFixed(1)} (${dest.rating_count} ulasan)</span>
+                        <span class="detail-value rating">${formatRating(dest.rating)} (${ratingCount} ulasan)</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Harga</span>
@@ -409,7 +433,7 @@ function displayResults(results) {
                     ` : ''}
                     <div class="detail-row">
                         <span class="detail-label">Durasi</span>
-                        <span class="detail-value">${dest.time} menit</span>
+                        <span class="detail-value">${time} menit</span>
                     </div>
                     ${dest.similarity != null ? `
                     <div class="detail-row">
