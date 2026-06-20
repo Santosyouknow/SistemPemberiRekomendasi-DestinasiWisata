@@ -455,8 +455,8 @@
                     <li><a href="#filter"><span class="sidebar-icon">🔍</span> Filter Rekomendasi</a></li>
                     <li><a href="#help"><span class="sidebar-icon">📖</span> Panduan</a></li>
                     <li><a href="#results"><span class="sidebar-icon">📋</span> Hasil</a></li>
-                    <li><a href="/popular"><span class="sidebar-icon">⭐</span> Destinasi Populer</a></li>
-                    <li><a href="/similar/Monumen Nasional"><span class="sidebar-icon">🔗</span> Destinasi Serupa</a></li>
+                    <li><a href="#results" onclick="getPopular(); return false;"><span class="sidebar-icon">⭐</span> Destinasi Populer</a></li>
+                    <li><a href="#results" onclick="getSimilar('Monumen Nasional'); return false;"><span class="sidebar-icon">🔗</span> Destinasi Serupa</a></li>
                 </ul>
             </div>
             
@@ -592,6 +592,16 @@
             });
         }
 
+        function formatRating(rating) {
+            const value = Number(rating) || 0;
+            const normalized = value > 5 ? value / 10 : value;
+            return normalized.toFixed(1);
+        }
+
+        function scrollToResults() {
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
         async function getRecommendations() {
             const city = document.getElementById('city').value;
             const category = document.getElementById('category').value;
@@ -622,6 +632,7 @@
                 
                 const data = await response.json();
                 displayResults(data.results, data.error);
+                scrollToResults();
             } catch (error) {
                 container.innerHTML = '<div class="no-results">Terjadi kesalahan: ' + error.message + '</div>';
             }
@@ -638,6 +649,21 @@
                 const response = await fetch(`/popular?city=${encodeURIComponent(city)}&top_n=10&user_lat=${encodeURIComponent(loc ? loc.lat : '')}&user_lng=${encodeURIComponent(loc ? loc.lng : '')}`);
                 const data = await response.json();
                 displayResults(data.results, null);
+                scrollToResults();
+            } catch (error) {
+                container.innerHTML = '<div class="no-results">Terjadi kesalahan: ' + error.message + '</div>';
+            }
+        }
+
+        async function getSimilar(placeName = 'Monumen Nasional') {
+            const container = document.getElementById('results-container');
+            container.innerHTML = `<div class="loading">Mencari destinasi serupa dengan ${placeName}...</div>`;
+
+            try {
+                const response = await fetch(`/similar/${encodeURIComponent(placeName)}`);
+                const data = await response.json();
+                displayResults(data.results, data.error);
+                scrollToResults();
             } catch (error) {
                 container.innerHTML = '<div class="no-results">Terjadi kesalahan: ' + error.message + '</div>';
             }
@@ -665,6 +691,8 @@
             
             results.forEach((dest, index) => {
                 const price = dest.price.toLocaleString('id-ID');
+                const ratingCount = dest.rating_count ?? 0;
+                const time = dest.time ?? 0;
                 html += `
                     <div class="destination-card">
                         <div class="destination-name">${index + 1}. ${dest.name}</div>
@@ -675,7 +703,7 @@
                         <div class="destination-details">
                             <div class="detail-row">
                                 <span class="detail-label">Rating</span>
-                                <span class="detail-value rating">${dest.rating.toFixed(1)} (${dest.rating_count} ulasan)</span>
+                                <span class="detail-value rating">${formatRating(dest.rating)} (${ratingCount} ulasan)</span>
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">Harga</span>
@@ -689,7 +717,7 @@
                             ` : ''}
                             <div class="detail-row">
                                 <span class="detail-label">Durasi</span>
-                                <span class="detail-value">${dest.time} menit</span>
+                                <span class="detail-value">${time} menit</span>
                             </div>
                             ${dest.similarity ? `
                             <div class="detail-row">
