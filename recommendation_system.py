@@ -22,6 +22,20 @@ class HybridRecommender:
         
     def preprocess_data(self):
         """Preprocess the dataset"""
+        # Parse coordinates from 'Coordinate' column (format: {'lat': value, 'lng': value})
+        def parse_coordinate(coord_str):
+            try:
+                import ast
+                coord_dict = ast.literal_eval(coord_str)
+                return coord_dict.get('lat'), coord_dict.get('lng')
+            except Exception:
+                return None, None
+
+        # Extract lat/lng from Coordinate column
+        self.df[['Lat', 'Long']] = self.df['Coordinate'].apply(
+            lambda x: pd.Series(parse_coordinate(x))
+        )
+
         # Remove columns that are empty, duplicated, or not used by the model.
         unused_columns = ['Column1', '_1', 'Coordinate']
         self.df = self.df.drop(columns=[c for c in unused_columns if c in self.df.columns])
@@ -136,7 +150,7 @@ class HybridRecommender:
         return np.mean(sim_scores)
     
     def recommend(self, city=None, category=None, min_price=None, max_price=None, max_time=None, 
-                  top_n=10, preference_text=None):
+                  top_n=10, preference_text=None, user_lat=None, user_lng=None, distance_weight=0.1):
         """
         Hybrid recommendation: Knowledge-based + Content-based
         
@@ -155,31 +169,65 @@ class HybridRecommender:
             return pd.DataFrame(), "Tidak ada destinasi yang sesuai dengan kriteria Anda."
         
         # Step 2: Hybrid scoring with better balance
+        # If user location is provided, compute distance for each candidate and include it
         scores = []
         for _, row in filtered_df.iterrows():
             idx = self.df.index[self.df['Place_Id'] == row['Place_Id']].tolist()[0]
-            
+
             # Content-based score (similarity to top-rated items in filtered set)
             content_score = self.content_based_score(idx, filtered_df)
-            
+
             # Normalized quality signals from preprocessing.
             rating_score = row['Rating_Normalized'] if row['Rating'] > 0 else 0
             count_score = row['Rating_Count_Normalized'] if row['Rating_Count'] > 0 else 0
-            
+
             # Hybrid score: BALANCED combination
             # 60% quality (rating + popularity) ensures we recommend well-rated items
             # 40% content similarity ensures relevance and diversity within category
             quality_score = 0.7 * rating_score + 0.3 * count_score
             hybrid_score = 0.60 * quality_score + 0.40 * content_score
-            
-            scores.append(hybrid_score)
+
+            # If user location provided, compute distance (km) using haversine
+            dist_value = None
+            if user_lat is not None and user_lng is not None and 'Lat' in row and 'Long' in row:
+                try:
+                    lat1 = float(user_lat)
+                    lon1 = float(user_lng)
+                    lat2 = float(row['Lat'])
+                    lon2 = float(row['Long'])
+                    R = 6371.0
+                    phi1 = np.radians(lat1)
+                    phi2 = np.radians(lat2)
+                    dphi = np.radians(lat2 - lat1)
+                    dlambda = np.radians(lon2 - lon1)
+                    a = np.sin(dphi / 2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda / 2)**2
+                    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+                    distance_km = R * c
+                    dist_value = float(distance_km)
+                except Exception:
+                    dist_value = None
+
+            scores.append((hybrid_score, dist_value))
         
         filtered_df = filtered_df.copy()
-        filtered_df['Score'] = scores
-        
-        # Sort by hybrid score
+        hybrid_scores = [s[0] for s in scores]
+        distances = [s[1] for s in scores]
+        filtered_df['Score'] = hybrid_scores
+        filtered_df['Distance_Km'] = distances
+
+        # If distances exist and a distance weight is provided, normalize distance and combine
+        if any(d is not None for d in distances) and distance_weight and distance_weight > 0:
+            # Replace None with a large value so they get low distance score
+            available = [d for d in distances if d is not None]
+            max_d = max(available) if available else 1.0
+            numeric_dists = [d if d is not None else max_d for d in distances]
+            distance_scores = [1.0 - (d / max_d) if max_d > 0 else 0.0 for d in numeric_dists]
+            filtered_df['Distance_Score'] = distance_scores
+            filtered_df['Score'] = filtered_df['Score'] * (1.0 - distance_weight) + filtered_df['Distance_Score'] * distance_weight
+
+        # Sort by final score
         filtered_df = filtered_df.sort_values('Score', ascending=False)
-        
+
         # Get top N
         recommendations = filtered_df.head(top_n)
         
