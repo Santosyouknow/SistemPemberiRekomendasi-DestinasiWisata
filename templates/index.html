@@ -554,6 +554,10 @@
                     <button class="btn-primary" onclick="getRecommendations()">Dapatkan Rekomendasi</button>
                     <button onclick="getPopular()">Destinasi Populer</button>
                     <button onclick="clearFilters()">Reset</button>
+                    <button onclick="requestLocationPermission()" style="background-color: #4CAF50;">📍 Aktifkan Lokasi</button>
+                </div>
+                <div id="location-status" style="margin-top: 10px; padding: 10px; border-radius: 8px; font-size: 0.9rem; display: none;">
+                    <span id="location-status-text"></span>
                 </div>
             </div>
             
@@ -578,16 +582,71 @@
     </div>
     
     <script>
+        let userLocation = null;
+        
+        function updateLocationStatus(status, color) {
+            const statusDiv = document.getElementById('location-status');
+            const statusText = document.getElementById('location-status-text');
+            statusDiv.style.display = 'block';
+            statusDiv.style.backgroundColor = color;
+            statusText.textContent = status;
+            console.log('Location Status:', status);
+        }
+
+        function requestLocationPermission() {
+            if (!navigator.geolocation) {
+                updateLocationStatus('❌ Browser Anda tidak mendukung geolocation', '#ffebee');
+                return;
+            }
+
+            updateLocationStatus('⏳ Meminta izin lokasi...', '#fff3e0');
+            
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    console.log('Location obtained:', userLocation);
+                    updateLocationStatus(`✅ Lokasi aktif (${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)})`, '#e8f5e9');
+                },
+                (error) => {
+                    console.error('Geolocation error:', error);
+                    let errorMsg = 'Gagal mendapatkan lokasi';
+                    if (error.code === 1) errorMsg = '❌ Izin akses lokasi ditolak. Silakan aktifkan di pengaturan browser.';
+                    else if (error.code === 2) errorMsg = '❌ Lokasi tidak tersedia. Periksa koneksi internet Anda.';
+                    else if (error.code === 3) errorMsg = '❌ Waktu permintaan lokasi terlampaui.';
+                    updateLocationStatus(errorMsg, '#ffebee');
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
         function getLocation() {
             return new Promise((resolve) => {
+                if (userLocation) {
+                    console.log('Using cached location:', userLocation);
+                    resolve(userLocation);
+                    return;
+                }
+                
                 if (!navigator.geolocation) {
+                    console.warn('Geolocation not supported');
                     resolve(null);
                     return;
                 }
+                
+                console.log('Requesting geolocation...');
                 navigator.geolocation.getCurrentPosition(
-                    (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                    () => resolve(null),
-                    { enableHighAccuracy: true, timeout: 8000 }
+                    (pos) => {
+                        userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                        console.log('Location obtained:', userLocation);
+                        updateLocationStatus(`✅ Lokasi aktif (${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)})`, '#e8f5e9');
+                        resolve(userLocation);
+                    },
+                    (error) => {
+                        console.warn('Geolocation error:', error);
+                        updateLocationStatus('⚠️ Tidak bisa mendapatkan lokasi otomatis. Klik tombol "Aktifkan Lokasi"', '#fff3e0');
+                        resolve(null);
+                    },
+                    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
                 );
             });
         }
@@ -614,6 +673,7 @@
             container.innerHTML = '<div class="loading">Memproses rekomendasi...</div>';
             
             const loc = await getLocation();
+            console.log('Final location for request:', loc);
             
             try {
                 const response = await fetch('/recommend', {
@@ -631,9 +691,11 @@
                 });
                 
                 const data = await response.json();
+                console.log('Recommendations response:', data);
                 displayResults(data.results, data.error);
                 scrollToResults();
             } catch (error) {
+                console.error('Error fetching recommendations:', error);
                 container.innerHTML = '<div class="no-results">Terjadi kesalahan: ' + error.message + '</div>';
             }
         }
@@ -644,13 +706,16 @@
             container.innerHTML = '<div class="loading">Memuat destinasi populer...</div>';
             
             const loc = await getLocation();
+            console.log('Location for popular:', loc);
             
             try {
                 const response = await fetch(`/popular?city=${encodeURIComponent(city)}&top_n=10&user_lat=${encodeURIComponent(loc ? loc.lat : '')}&user_lng=${encodeURIComponent(loc ? loc.lng : '')}`);
                 const data = await response.json();
+                console.log('Popular response:', data);
                 displayResults(data.results, null);
                 scrollToResults();
             } catch (error) {
+                console.error('Error fetching popular:', error);
                 container.innerHTML = '<div class="no-results">Terjadi kesalahan: ' + error.message + '</div>';
             }
         }

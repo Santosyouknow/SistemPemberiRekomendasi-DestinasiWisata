@@ -7,6 +7,7 @@ from recommendation_system import HybridRecommender, save_model
 import os
 from datetime import datetime
 import math
+import pandas as pd
 
 app = Flask(__name__)
 
@@ -65,7 +66,9 @@ def recommend():
         min_price=min_price if min_price > 0 else None,
         max_price=max_price if max_price > 0 else None,
         max_time=max_time if max_time > 0 else None,
-        top_n=top_n
+        top_n=top_n,
+        user_lat=user_lat,
+        user_lng=user_lng
     )
     
     if err:
@@ -73,13 +76,33 @@ def recommend():
     
     results = []
     for _, row in recs.iterrows():
-        dest_lat = row['Lat'] if pd.notna(row['Lat']) else None
-        dest_lng = row['Long'] if pd.notna(row['Long']) else None
+        # Get destination coordinates with validation
+        dest_lat = None
+        dest_lng = None
+        try:
+            if pd.notna(row['Lat']):
+                lat_val = float(row['Lat'])
+                # Valid latitude: -90 to 90
+                if -90 <= lat_val <= 90:
+                    dest_lat = lat_val
+            if pd.notna(row['Long']):
+                lng_val = float(row['Long'])
+                # Valid longitude: -180 to 180
+                if -180 <= lng_val <= 180:
+                    dest_lng = lng_val
+        except (ValueError, TypeError):
+            pass
+        
+        # Calculate distance with validation
         distance = None
         if user_lat is not None and user_lng is not None and dest_lat is not None and dest_lng is not None:
             try:
-                distance = haversine_km(float(user_lat), float(user_lng), float(dest_lat), float(dest_lng))
-            except Exception:
+                user_lat_f = float(user_lat)
+                user_lng_f = float(user_lng)
+                # Validate user coordinates
+                if -90 <= user_lat_f <= 90 and -180 <= user_lng_f <= 180:
+                    distance = haversine_km(user_lat_f, user_lng_f, dest_lat, dest_lng)
+            except (ValueError, TypeError):
                 distance = None
         
         results.append({
@@ -125,8 +148,6 @@ def similar(place_name):
     return jsonify({'error': None, 'results': results})
 
 
-import pandas as pd
-
 @app.route('/popular')
 def popular():
     """Get popular destinations"""
@@ -139,13 +160,33 @@ def popular():
     
     results = []
     for _, row in pop.iterrows():
-        dest_lat = row['Lat'] if pd.notna(row['Lat']) else None
-        dest_lng = row['Long'] if pd.notna(row['Long']) else None
+        # Get destination coordinates with validation
+        dest_lat = None
+        dest_lng = None
+        try:
+            if pd.notna(row['Lat']):
+                lat_val = float(row['Lat'])
+                # Valid latitude: -90 to 90
+                if -90 <= lat_val <= 90:
+                    dest_lat = lat_val
+            if pd.notna(row['Long']):
+                lng_val = float(row['Long'])
+                # Valid longitude: -180 to 180
+                if -180 <= lng_val <= 180:
+                    dest_lng = lng_val
+        except (ValueError, TypeError):
+            pass
+        
+        # Calculate distance with validation
         distance = None
         if user_lat is not None and user_lng is not None and dest_lat is not None and dest_lng is not None:
             try:
-                distance = haversine_km(float(user_lat), float(user_lng), float(dest_lat), float(dest_lng))
-            except Exception:
+                user_lat_f = float(user_lat)
+                user_lng_f = float(user_lng)
+                # Validate user coordinates
+                if -90 <= user_lat_f <= 90 and -180 <= user_lng_f <= 180:
+                    distance = haversine_km(user_lat_f, user_lng_f, dest_lat, dest_lng)
+            except (ValueError, TypeError):
                 distance = None
         
         results.append({
